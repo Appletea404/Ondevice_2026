@@ -275,7 +275,7 @@ module dht11_cntr(
         else begin
             case(state)
                 S_IDLE:begin
-                    if(count_usec < 22'd3_000_000)begin
+                    if(count_usec < 22'd3_0)begin     // 3_000_000
                         count_usec_e = 1;
                         dht11_data_out_e = 0;
                     end

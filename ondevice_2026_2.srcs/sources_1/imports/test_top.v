@@ -844,13 +844,13 @@ module i2c_txtlcd_top(
                 end
                 SEND_CHARACTER     :begin
                     if(busy)begin
-                        if(cnt_data >= 9)cnt_data = 0;
+                        if(cnt_data >= 26)cnt_data = 0;
                         send = 0;
                         next_state = IDLE;
                     end
                     else if(!send)begin
                         rs =1;
-                        send_buffer = "0" + cnt_data;
+                        send_buffer = "A" + cnt_data;
                         send = 1;
                         cnt_data = cnt_data + 1;
                     end
@@ -1154,7 +1154,24 @@ module tft_lcd_top_HY(
 endmodule
 
 
+module dht11_top(
+    input clk, reset_p,
+    inout dht11_data,
+    output [7:0] seg,
+    output [3:0] com,
+    output [15:0] led);
+    
+    wire [7:0] humidity, temperature;
+    dht11_cntr dht(clk, reset_p, dht11_data, humidity, temperature, led);
+    
+    wire [7:0] humidity_bcd, temperature_bcd;
+    bin_to_dec btd_humi(.bin(humidity), .bcd(humidity_bcd));
+    bin_to_dec btd_tmpr(.bin(temperature), .bcd(temperature_bcd));
+    
+    FND_cntr fnd(.clk(clk), .reset_p(reset_p), 
+            .hex_value({humidity_bcd, temperature_bcd}),.hex_bcd(1), .seg(seg), .com(com));
 
+endmodule
 
 
 
