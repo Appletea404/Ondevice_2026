@@ -572,16 +572,19 @@ module sg_90_top(
             .fnd_value({4'd0, bcd_duty[7:0], 4'd0}), .seg(seg), .com(com)); 
 endmodule
 
+// XADC 단일 채널(ch6) 모듈
+// vauxp6/vauxn6 아날로그 입력을 12비트 ADC로 읽어
+// FND에 십진수 표시, LED[14:0]에 bar graph 표시
 module adc_ch6_top(
     input clk, reset_p,
-    input vauxp6, vauxn6,
+    input vauxp6, vauxn6,       // XADC 보조 채널 6 차동 입력
     output [7:0] seg,
     output [3:0] com,
     output [15:0] led);
-    
-    wire [4:0] channel_out;
-    wire eoc_out;
-    wire [15:0] do_out;
+
+    wire [4:0] channel_out;     // 현재 변환 중인 채널 번호
+    wire eoc_out;               // End of Conversion: 변환 완료 시 1클럭 High
+    wire [15:0] do_out;         // XADC 출력 데이터 (상위 12비트가 유효값)
     xadc_wiz_0 adc_ch6(
           .daddr_in({2'b00, channel_out}),            // Address bus for the dynamic reconfiguration port
           .dclk_in(clk),             // Clock input for the dynamic reconfiguration port
@@ -592,22 +595,26 @@ module adc_ch6_top(
           .channel_out(channel_out),         // Channel Selection Outputs
           .do_out(do_out),              // Output data bus for dynamic reconfiguration port
           .eoc_out(eoc_out));
-     
+
      wire eoc_out_pedge;
+     // eoc_out 상승 엣지 감지: 변환 완료 시점에 adc_value 래치
      edge_detector_n ed(.clk(clk), .reset_p(reset_p),
-                        .cp(eoc_out), .p_edge(eoc_out_pedge));     
-     reg [11:0] adc_value;
+                        .cp(eoc_out), .p_edge(eoc_out_pedge));
+     reg [11:0] adc_value;      // 래치된 12비트 ADC 변환값 (0~4095)
      always @(posedge clk, posedge reset_p)begin
         if(reset_p)adc_value = 0;
-        else if(eoc_out_pedge)adc_value = do_out[15:4];
+        else if(eoc_out_pedge)adc_value = do_out[15:4]; // 상위 12비트가 유효값
      end
-     
+
     wire [15:0] bcd_adc_value;
+    // 12비트 이진값을 BCD로 변환하여 FND에 십진수로 표시 (0~4095)
     bin_to_dec btd(.bin(adc_value), .bcd(bcd_adc_value));
-    
-    FND_cntr fnd(.clk(clk), .reset_p(reset_p), 
-            .fnd_value(bcd_adc_value), .seg(seg), .com(com)); 
-            
+
+    FND_cntr fnd(.clk(clk), .reset_p(reset_p),
+            .fnd_value(bcd_adc_value), .seg(seg), .com(com));
+
+    // 상위 4비트(0~15)로 bar graph: 값이 클수록 더 많은 LED 점등
+    // ADC 최대(4095)일 때 [11:8]=15 → led[14:0] 전부 ON (led[15]는 미사용)
     assign led[0] = adc_value[11:8] >= 1;
     assign led[1] = adc_value[11:8] >= 2;
     assign led[2] = adc_value[11:8] >= 3;
@@ -626,17 +633,23 @@ module adc_ch6_top(
 
 endmodule
 
+// XADC 2채널 시퀀스 모드 모듈 (조이스틱 X/Y 축)
+// ch6(vauxp6/n6) = X축, ch15(vauxp15/n15) = Y축
+// XADC가 ch6→ch15 순서로 자동 순환 변환하며 channel_out으로 어느 채널인지 구분
+// FND 좌측 2자리: X값(0~63), 우측 2자리: Y값(0~63)
+// LED[7:0]: X축 bar graph (중앙→좌), LED[15:8]: Y축 bar graph (중앙→우)
 module adc_sequence_top(
     input clk, reset_p,
-    input vauxp6, vauxn6, vauxp15, vauxn15,
+    input vauxp6, vauxn6,       // XADC 보조 채널 6: 조이스틱 X축
+    input vauxp15, vauxn15,     // XADC 보조 채널 15: 조이스틱 Y축
     output [7:0] seg,
     output [3:0] com,
     output [15:0] led);
-    
-    wire [4:0] channel_out;
-    wire eoc_out;
-    wire [15:0] do_out;
-    adc_2ch_sequence joystick(
+
+    wire [4:0] channel_out;     // 현재 변환 완료된 채널 번호
+    wire eoc_out;               // End of Conversion 신호
+    wire [15:0] do_out;         // XADC 출력 데이터
+    adc_ch2 joystick(
           .daddr_in({2'b00, channel_out}),            // Address bus for the dynamic reconfiguration port
           .dclk_in(clk),             // Clock input for the dynamic reconfiguration port
           .den_in(eoc_out),              // Enable Signal for the dynamic reconfiguration port
@@ -648,9 +661,10 @@ module adc_sequence_top(
           .channel_out(channel_out),         // Channel Selection Outputs
           .do_out(do_out),              // Output data bus for dynamic reconfiguration port
           .eoc_out(eoc_out));
-          
-    reg [11:0] adc_value_x, adc_value_y;
+
+    reg [11:0] adc_value_x, adc_value_y; // X, Y축 12비트 ADC 변환값 (0~4095)
     wire eoc_out_pedge;
+    // eoc_out 상승 엣지에서 channel_out으로 X/Y 구분하여 각각 래치
     edge_detector_n ed(.clk(clk), .reset_p(reset_p),
                         .cp(eoc_out), .p_edge(eoc_out_pedge));
     always @(posedge clk, posedge reset_p)begin
@@ -660,37 +674,39 @@ module adc_sequence_top(
         end
         else if(eoc_out_pedge)begin
             case(channel_out[3:0])
-                6: adc_value_x = do_out[15:4];
-                15:adc_value_y = do_out[15:4];
+                6: adc_value_x = do_out[15:4];  // ch6 → X축 저장
+                15:adc_value_y = do_out[15:4];  // ch15 → Y축 저장
             endcase
         end
     end
-    
+
     wire [7:0] x_bcd, y_bcd;
+    // 상위 6비트(0~63)만 BCD 변환하여 FND에 표시
     bin_to_dec btd_x(.bin(adc_value_x[11:6]), .bcd(x_bcd));
     bin_to_dec btd_y(.bin(adc_value_y[11:6]), .bcd(y_bcd));
-    
-    FND_cntr fnd(.clk(clk), .reset_p(reset_p), 
+
+    // FND: [X 십][X 일][Y 십][Y 일] 순으로 표시
+    FND_cntr fnd(.clk(clk), .reset_p(reset_p),
             .fnd_value({x_bcd, y_bcd}), .seg(seg), .com(com));
-            
-            
-    assign led[0] = adc_value_x[11:9] >= 8;
-    assign led[1] = adc_value_x[11:9] >= 7;
-    assign led[2] = adc_value_x[11:9] >= 6;
-    assign led[3] = adc_value_x[11:9] >= 5;
-    assign led[4] = adc_value_x[11:9] >= 4;
-    assign led[5] = adc_value_x[11:9] >= 3;
-    assign led[6] = adc_value_x[11:9] >= 2;
-    assign led[7] = adc_value_x[11:9] >= 1;
-    assign led[8] = adc_value_y[11:9] >= 1;
-    assign led[9] = adc_value_y[11:9] >= 2;
-    assign led[10] = adc_value_y[11:9] >= 3;
-    assign led[11] = adc_value_y[11:9] >= 4;
-    assign led[12] = adc_value_y[11:9] >= 5;
-    assign led[13] = adc_value_y[11:9] >= 6;
-    assign led[14] = adc_value_y[11:9] >= 7;        
-    assign led[15] = adc_value_y[11:9] >= 8;        
-            
+
+
+    assign led[0] = adc_value_x[11:9] >= 7; 
+    assign led[1] = adc_value_x[11:9] > 6;
+    assign led[2] = adc_value_x[11:9] > 5;
+    assign led[3] = adc_value_x[11:9] > 4;
+    assign led[4] = adc_value_x[11:9] > 3;
+    assign led[5] = adc_value_x[11:9] > 2;
+    assign led[6] = adc_value_x[11:9] > 1;
+    assign led[7] = adc_value_x[11:9] > 0;
+    assign led[8] = adc_value_y[11:9] > 0;
+    assign led[9] = adc_value_y[11:9] > 1;
+    assign led[10] = adc_value_y[11:9] > 2;
+    assign led[11] = adc_value_y[11:9] > 3;
+    assign led[12] = adc_value_y[11:9] > 4;
+    assign led[13] = adc_value_y[11:9] > 5;
+    assign led[14] = adc_value_y[11:9] > 6;
+    assign led[15] = adc_value_y[11:9] >= 7; 
+
 endmodule
 
 module ultra_sonic_top(
