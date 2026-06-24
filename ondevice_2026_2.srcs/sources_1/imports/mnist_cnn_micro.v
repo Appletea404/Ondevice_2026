@@ -26,11 +26,10 @@ module conv2d_buf(
     input [7:0] pixel,
     output reg [9:0] buf_idx,
     output reg [7:0] value_00, value_01, value_02, value_03, value_04, 
-                     value_05, value_06, value_07, value_08, value_09, 
-                     value_10, value_11, 
+                     value_05, value_06, value_07, value_08,
     output reg valid_buf);
     
-    localparam WIDTH = 31;
+    localparam WIDTH = 30;      //28 * 28인데 fadding고려해서 30*30
     localparam HIGHT = 30;
     
     localparam IDLE             = 0;
@@ -66,9 +65,7 @@ module conv2d_buf(
             value_06 = 0;
             value_07 = 0;
             value_08 = 0;
-            value_09 = 0;
-            value_10 = 0;
-            value_11 = 0;
+            
         end
         else begin
             case(state)
@@ -77,7 +74,7 @@ module conv2d_buf(
                     else next_state = IDLE;
                 end
                 BUFFER_LOAD:begin
-                    if(h_idx == 0 || h_idx >= 29 || w_idx == 0 || w_idx >=29)begin
+                    if(h_idx == 0 || h_idx >= 29 || w_idx == 0 || w_idx >=29)begin      //fill padding
                         buffer[h_idx][w_idx] = 0;
                     end
                     else begin
@@ -85,7 +82,7 @@ module conv2d_buf(
                         buf_idx = buf_idx + 1;
                     end
                     w_idx = w_idx + 1;
-                    if(w_idx >= 31)begin
+                    if(w_idx >= 30)begin
                         w_idx = 0;
                         h_idx = h_idx + 1;
                         if(h_idx >= 30)begin
@@ -112,15 +109,13 @@ module conv2d_buf(
                     value_00 = buffer[h_idx][w_idx];
                     value_01 = buffer[h_idx][w_idx+1];
                     value_02 = buffer[h_idx][w_idx+2];
-                    value_03 = buffer[h_idx][w_idx+3]; 
-                    value_04 = buffer[h_idx+1][w_idx];
-                    value_05 = buffer[h_idx+1][w_idx+1];
-                    value_06 = buffer[h_idx+1][w_idx+2];
-                    value_07 = buffer[h_idx+1][w_idx+3];
-                    value_08 = buffer[h_idx+2][w_idx];
-                    value_09 = buffer[h_idx+2][w_idx+1];
-                    value_10 = buffer[h_idx+2][w_idx+2];
-                    value_11 = buffer[h_idx+2][w_idx+3];
+                    value_03 = buffer[h_idx+1][w_idx]; 
+                    value_04 = buffer[h_idx+1][w_idx+1];
+                    value_05 = buffer[h_idx+1][w_idx+2];
+                    value_06 = buffer[h_idx+2][w_idx];
+                    value_07 = buffer[h_idx+2][w_idx+1];
+                    value_08 = buffer[h_idx+2][w_idx+2];
+
                     
                     w_idx = w_idx + 1;
                     
@@ -137,8 +132,7 @@ module conv2d_calc(
     input clk, reset_p,
     input valid_buf,
     input [7:0] value_00, value_01, value_02, value_03, value_04, 
-                     value_05, value_06, value_07, value_08, value_09, 
-                     value_10, value_11,
+                     value_05, value_06, value_07, value_08,
     output reg signed [15:0] conv_out_0,
     output reg signed [15:0] conv_out_1,
     output reg signed [15:0] conv_out_2,
@@ -147,13 +141,13 @@ module conv2d_calc(
     output reg valid_out_calc
 );
     localparam ROW = 3;
-    localparam COLUMN = 4;
+    localparam COLUMN = 3;
     reg [7:0] buffer [0:COLUMN - 1][0:ROW - 1];
-    reg signed [7:0] weight_0 [0:11];
-    reg signed [7:0] weight_1 [0:11];
-    reg signed [7:0] weight_2 [0:11];
-    reg signed [7:0] weight_3 [0:11];
-    reg signed [7:0] weight_4 [0:11];
+    reg signed [7:0] weight_0 [0:8];
+    reg signed [7:0] weight_1 [0:8];
+    reg signed [7:0] weight_2 [0:8];
+    reg signed [7:0] weight_3 [0:8];
+    reg signed [7:0] weight_4 [0:8];
     reg signed [7:0] bias [0:4];
     
     initial begin
@@ -185,9 +179,6 @@ module conv2d_calc(
                        value_06 * weight_0[6] + 
                        value_07 * weight_0[7] + 
                        value_08 * weight_0[8] + 
-                       value_09 * weight_0[9] + 
-                       value_10 * weight_0[10] + 
-                       value_11 * weight_0[11] + 
                        bias[0];
             if(conv_out_0 < 0)conv_out_0 = 0;
             conv_out_1 = value_00 * weight_1[0] + 
@@ -199,9 +190,6 @@ module conv2d_calc(
                        value_06 * weight_1[6] + 
                        value_07 * weight_1[7] + 
                        value_08 * weight_1[8] + 
-                       value_09 * weight_1[9] + 
-                       value_10 * weight_1[10] + 
-                       value_11 * weight_1[11] + 
                        bias[1];
             if(conv_out_1 < 0)conv_out_1 = 0;
             conv_out_2 = value_00 * weight_2[0] + 
@@ -213,9 +201,6 @@ module conv2d_calc(
                        value_06 * weight_2[6] + 
                        value_07 * weight_2[7] + 
                        value_08 * weight_2[8] + 
-                       value_09 * weight_2[9] + 
-                       value_10 * weight_2[10] + 
-                       value_11 * weight_2[11] + 
                        bias[2];
             if(conv_out_2 < 0)conv_out_2 = 0;
             conv_out_3 = value_00 * weight_3[0] + 
@@ -227,9 +212,6 @@ module conv2d_calc(
                        value_06 * weight_3[6] + 
                        value_07 * weight_3[7] + 
                        value_08 * weight_3[8] + 
-                       value_09 * weight_3[9] + 
-                       value_10 * weight_3[10] + 
-                       value_11 * weight_3[11] + 
                        bias[3];
             if(conv_out_3 < 0)conv_out_3 = 0;
             conv_out_4 = value_00 * weight_4[0] + 
@@ -241,9 +223,6 @@ module conv2d_calc(
                        value_06 * weight_4[6] + 
                        value_07 * weight_4[7] + 
                        value_08 * weight_4[8] + 
-                       value_09 * weight_4[9] + 
-                       value_10 * weight_4[10] + 
-                       value_11 * weight_4[11] + 
                        bias[4];
             if(conv_out_4 < 0)conv_out_4 = 0;
         end
