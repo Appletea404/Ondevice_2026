@@ -1092,7 +1092,13 @@ module tft_lcd_top_HY(
     wire [11:0] X_Value, Y_Value;
     wire Get_Flag;
     
-    xpt2046 touch_pad(Clk50M, Rst_n, 1'b1, X_Value, Y_Value, Get_Flag, PenIrq_n, DCLK, DIN, DOUT, CS_N);
+    // 터치 SPI가 LCD refresh에 주는 간섭을 줄이기 위해 샘플링 시작 간격을 약 15ms로 늦춘다.
+    // xpt2046 기본 CNT_TOP=499999는 50MHz 기준 약 10ms이다.
+    xpt2046 #(.CNT_TOP(20'd749999)) touch_pad(
+        Clk50M, Rst_n, 1'b1,
+        X_Value, Y_Value, Get_Flag,
+        PenIrq_n, DCLK, DIN, DOUT, CS_N
+    );
 
     // 노이즈 제거
     wire [11:0] x_tmp = (X_Value > 12'd300) ? (X_Value - 12'd300) : 12'd0;
@@ -1110,12 +1116,40 @@ module tft_lcd_top_HY(
     // =========================================================
     // 5. 입력 제한 (Bounding Box 내부만 터치 허용)
     // =========================================================
-    // 터치한 곳이 224x224 중앙 박스 내부인지 확인
-    wire in_box_touch = (t_x >= 8 && t_x < 232 && t_y >= 48 && t_y < 272);
-    
-    // 터치 좌표를 28x28 그리드 인덱스로 변환
-    wire [4:0] grid_x_touch = (t_x - 8) >> 3;
-    wire [4:0] grid_y_touch = (t_y - 48) >> 3;
+    // XPT2046의 X/Y/Get_Flag는 Clk50M 도메인에서 나온다.
+    // Get_Flag가 뜬 순간의 좌표만 latch하고, clk 도메인에서는 새 샘플당 1회만 BRAM에 쓴다.
+    reg [15:0] touch_x_latched_50;
+    reg [15:0] touch_y_latched_50;
+    reg touch_sample_toggle_50;
+
+    always @(posedge Clk50M or posedge reset_p) begin
+        if (reset_p) begin
+            touch_x_latched_50 <= 16'd0;
+            touch_y_latched_50 <= 16'd0;
+            touch_sample_toggle_50 <= 1'b0;
+        end else if (Get_Flag && ~PenIrq_n) begin
+            touch_x_latched_50 <= t_x;
+            touch_y_latched_50 <= t_y;
+            touch_sample_toggle_50 <= ~touch_sample_toggle_50;
+        end
+    end
+
+    // 50MHz 도메인의 toggle을 100MHz clk 도메인으로 동기화한다.
+    reg [2:0] touch_sample_sync;
+    always @(posedge clk or posedge reset_p) begin
+        if (reset_p) touch_sample_sync <= 3'b000;
+        else touch_sample_sync <= {touch_sample_sync[1:0], touch_sample_toggle_50};
+    end
+
+    wire touch_sample_valid = touch_sample_sync[2] ^ touch_sample_sync[1];
+
+    // latch된 좌표가 224x224 중앙 박스 내부인지 확인한다.
+    wire in_box_touch = (touch_x_latched_50 >= 8 && touch_x_latched_50 < 232 &&
+                         touch_y_latched_50 >= 48 && touch_y_latched_50 < 272);
+
+    // 터치 좌표를 28x28 그리드 인덱스로 변환한다.
+    wire [4:0] grid_x_touch = (touch_x_latched_50 - 8) >> 3;
+    wire [4:0] grid_y_touch = (touch_y_latched_50 - 48) >> 3;
 
     always @(posedge clk or posedge reset_p) begin
         if(reset_p) begin
@@ -1124,13 +1158,14 @@ module tft_lcd_top_HY(
             wr_en_reg <= 0;
         end
         else begin
-            // 터치펜이 눌려있고(~PenIrq_n), 동시에 박스 안(in_box_touch)일 때만 쓰기 활성화
-            if (~PenIrq_n && in_box_touch) begin
+            // 좌표 샘플링이 완료된 순간에만 1클럭 write한다.
+            // 28x28 EMNIST 입력이 너무 굵어지지 않도록 한 샘플당 한 칸만 기록한다.
+            if (touch_sample_valid && in_box_touch) begin
                 wr_addr <= (grid_y_touch * 28) + grid_x_touch;
                 data_to_ram <= 8'hFF; // 흰색
-                wr_en_reg <= 1'b1;    // BRAM에 쓰기 허용
+                wr_en_reg <= 1'b1;    // BRAM에 1회 쓰기
             end else begin
-                wr_en_reg <= 1'b0;    // 박스 밖이면 무시 (입력 제한)
+                wr_en_reg <= 1'b0;
             end
         end
     end
